@@ -1,0 +1,4 @@
+interface:
+  display_name: "SkillSvc 图片生成"
+  short_description: "用上下文生成并持续编辑 GPT 或香蕉图片"
+  default_prompt: "使用 $skillsvc-image 根据我的要求和相关上下文生成或编辑图片。"

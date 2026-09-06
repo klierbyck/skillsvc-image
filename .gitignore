@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+.baoyu-skills/
+.DS_Store
+
+generated_images/
+generated-images/
+cover-image/
+wechat-article/
+image-cards/
+
+__pycache__/
+*.py[cod]
