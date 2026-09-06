@@ -1,6 +1,10 @@
 # CLI 调用约定
 
-`scripts/generate_image.py` 需要 Python 3 和 `requests`。
+`scripts/generate_image.py` 需要 Python 3.9 或更高版本和 `requests`。在技能根目录安装依赖：
+
+```bash
+python3 -m pip install -r requirements.txt
+```
 
 ## 环境配置
 

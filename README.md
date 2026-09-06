@@ -1,0 +1,159 @@
+# SkillSvc Image Skill
+
+一个以图片生成为核心的通用 AI 技能，通过 SkillSvc API 调用 `gpt-image-2` 或
+Nano Banana，支持文生图、参考图生图、连续图片编辑，以及基于完整内容上下文的图文生成。
+
+## 功能
+
+### 核心生图能力
+
+- 文生图：根据提示词和对话上下文生成新图片。
+- 参考图生图：参考一张或多张图片的风格、人物、产品或构图，生成全新图片。
+- 图片编辑：基于已有图片或 session 持续调整，并保留此前上下文。
+- 模型选择：默认使用 `gpt-image-2`；用户明确要求 Banana、Nano Banana、
+  nanobanana、香蕉生图或 `nana-banana-2` 时才切换模型。
+- 参数控制：支持宽高比、`1K`/`2K`/`4K`、质量和输出格式。
+
+### 图文扩展
+
+这些能力用于为图片提供准确上下文，不是独立的纯文字写作或发布功能：
+
+- 普通文章：可从主题写文章并配图，也可读取已有文章，在理解完整结构后规划插图。
+- 微信公众号：使用内置 `baoyu-cover-image` 规则生成封面、正文插图或完整公众号图文。
+- 小红书与贴图号：使用内置 `baoyu-xhs-images` 规则整理文案并生成连续图片卡片。
+- 参考内容：文章、帖子、链接和图片默认作为软参考，仅借鉴角度、结构、语气和视觉节奏。
+- 图片编辑：每张图片保存独立 session，后续可以继续修改对应图片。
+
+本技能只在本地生成文章、提示词、图片和 session，不登录、上传或发布到平台。
+
+## 默认参数
+
+| 场景 | 默认模型 | 默认比例 | 默认尺寸 |
+|---|---|---:|---:|
+| 普通文生图、参考图生图、图片编辑 | `gpt-image-2` | `16:9` | `2K` |
+| 微信公众号头条封面 | `gpt-image-2` | `2.35:1` | `2K` |
+| 微信公众号正文插图 | `gpt-image-2` | `16:9` | `2K` |
+| 小红书、贴图号图片卡片 | `gpt-image-2` | `3:4` | `2K` |
+
+用户明确指定的模型、比例、尺寸、质量和格式始终优先。
+
+## 目录结构
+
+```text
+skillsvc-image/
+├── SKILL.md                         # 技能入口与任务路由
+├── agents/openai.yaml               # Codex 展示元数据
+├── scripts/generate_image.py        # 通用生图 CLI
+├── references/                      # CLI 与普通长文配图规则
+├── baoyu-cover-image/               # 公众号封面和正文配图规则
+└── baoyu-xhs-images/                # 小红书与贴图号图片卡片规则
+```
+
+两个平台规则目录已经包含在本技能中，不需要分别安装，也不需要在项目中创建
+`.agents` 目录。
+
+## 安装到 Codex
+
+环境要求：Git、Python 3.9 或更高版本，以及可用的 SkillSvc API Key。
+
+```bash
+git clone https://github.com/klierbyck/skillsvc-image.git \
+  ~/.codex/skills/skillsvc-image
+
+cd ~/.codex/skills/skillsvc-image
+python3 -m pip install -r requirements.txt
+cp .env.example .env
+chmod 600 .env
+```
+
+编辑 `.env`，填写至少一个模型的 API Key。重新打开 Codex 或开始一个新任务后，
+可以显式调用 `$skillsvc-image`，也可以直接描述生图需求让 Codex 自动选择。
+
+示例：
+
+```text
+使用 $skillsvc-image 生成一张未来城市的横版插画。
+使用香蕉生图，参考 /path/reference.png 生成一张 3:4 的小红书封面。
+写一篇关于家庭 NAS 的微信公众号文章并配图。
+写一组关于春季护肤的小红书图文，共 6 张图。
+把刚生成图片的背景改成清晨，其他内容保持不变。
+```
+
+更新已安装技能：
+
+```bash
+cd ~/.codex/skills/skillsvc-image
+git pull
+```
+
+## 环境配置
+
+技能会自动读取技能根目录的 `.env`：
+
+```dotenv
+GPT_IMAGE_API_KEY=
+NANO_BANANA_API_KEY=
+BASE_URL=https://www.skillsvc.cc
+```
+
+- `GPT_IMAGE_API_KEY`：调用 `gpt-image-2`。
+- `NANO_BANANA_API_KEY`：调用 `nana-banana-2`。
+- `BASE_URL`：可选，默认 `https://www.skillsvc.cc`。
+- 未使用的模型 Key 可以留空。
+- 进程环境变量优先于 `.env`；也可以通过 `--env-file` 指定其他配置文件。
+
+`.env` 已加入 `.gitignore`，不要把真实密钥提交到 Git。
+
+## 供其他 AI 或命令行使用
+
+任何能够读取文件并执行命令的 AI 都可以使用本技能：让它先读取根目录的
+`SKILL.md`，根据任务路由读取对应规则，再调用 `scripts/generate_image.py`。
+
+也可以直接使用 CLI。
+
+文生图：
+
+```bash
+python3 scripts/generate_image.py generate \
+  --prompt "一座雨后清晨的未来城市" \
+  --context "用于技术文章头图，画面干净，避免文字"
+```
+
+参考图生图：
+
+```bash
+python3 scripts/generate_image.py reference \
+  --image /absolute/path/reference.png \
+  --prompt "参考配色和插画语言，使用全新构图"
+```
+
+指定 Nano Banana 和图片比例：
+
+```bash
+python3 scripts/generate_image.py generate \
+  --model nana-banana-2 \
+  --aspect-ratio 3:4 \
+  --image-size 2K \
+  --prompt "小红书知识卡片封面"
+```
+
+继续编辑上一张图片：
+
+```bash
+python3 scripts/generate_image.py edit \
+  --session /absolute/path/session.json \
+  --prompt "将背景改成清晨，保持人物、构图和配色不变"
+```
+
+仅检查请求参数、不调用 API：
+
+```bash
+python3 scripts/generate_image.py generate \
+  --prompt "测试提示词" \
+  --dry-run
+```
+
+成功后 CLI 输出 JSON，其中包含图片绝对路径、session 路径、模型和实际参数。
+同一张图片的后续调整应继续使用对应 session；不同图片应使用不同 session。
+
+更多参数和 API 映射见 [references/cli.md](references/cli.md)。
