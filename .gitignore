@@ -12,3 +12,6 @@ image-cards/
 
 __pycache__/
 *.py[cod]
+
+# Local historical audit artifacts
+/reports/skill-audit-2026-09-08/
