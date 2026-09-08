@@ -50,6 +50,7 @@ description: 为小红书、小绿书、XHS、RedNote、贴图号或微信贴图
 image-cards/{topic-slug}/
 ├── source-references/
 ├── post.md
+├── card-copy.md
 ├── analysis.md
 ├── outline.md
 ├── prompts/NN-{type}-{slug}.md
@@ -59,15 +60,15 @@ image-cards/{topic-slug}/
 
 详细模式可以额外生成 `outline-strategy-a.md`、`outline-strategy-b.md` 和 `outline-strategy-c.md`。不要在子技能中创建 session 文件或 `generation-manifest.json`；这些由父级技能在实际生成时维护。
 
-覆盖任何 source、outline、prompt 或图片前，先保留带时间戳的备份。prompt 文件是平台规划的 source of truth，必须在返回资产规格前全部写入磁盘。
+覆盖任何 source、outline、prompt 或图片前，先保留带时间戳的备份。prompt 文件是视觉参数的执行依据，可见文字从定稿复制，必须在返回资产规格前全部写入磁盘。
 
 ## 工作流
 
 1. 确定目标平台、受众、主题和用户要求的最终交付内容。
-2. 准备 `post.md`。只有主题时创作必要平台文案；有参考内容时提取角度、结构和信息组织后重新表达；已有最终文案时默认保留。
+2. 准备 `post.md`。新写、跨平台改编或实质改写时，按 [文案衔接规则](../references/writing-integration.md) 调用包内 [活人写作](../human-writing/SKILL.md)，检查材料并写适合平台的短文案；不强制长帖或固定材料数量。有参考内容时借鉴结构后原创表达；已有最终文案只拆卡，不擅自重写。
 3. 按 [references/workflows/analysis-framework.md](references/workflows/analysis-framework.md) 创建 `analysis.md`，推荐图片数量、内容策略、风格、布局和配色。
 4. 仅在存在实质歧义时确认。快速模式创建一份 `outline.md`；详细模式按 [references/workflows/outline-template.md](references/workflows/outline-template.md) 生成三种不同结构后再选定。
-5. 按 [references/workflows/prompt-assembly.md](references/workflows/prompt-assembly.md) 为每张卡片写入完整 prompt。
+5. 把每张卡片准确的可见文字写入 `card-copy.md`，按文案衔接规则检查本次新增或改写的部分，保留事实、限定条件与引用归属。再按 [references/workflows/prompt-assembly.md](references/workflows/prompt-assembly.md) 写完整 prompt。可见文字以 `post.md` / `card-copy.md` 为准，`outline.md` 负责顺序、布局与映射，不能各自维护不同版本。
 6. 返回带依赖关系的资产规格列表给父级 `skillsvc-image`；不得直接执行图片生成。
 
 ## 卡片策略

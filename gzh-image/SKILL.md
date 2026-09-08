@@ -75,7 +75,7 @@ wechat-article/{topic-slug}/
 
 1. 判断是仅封面、已有文章配图、直接创作图文，还是参考内容创作图文。
 2. 保存用户提供的正文和参考材料。参考内容默认是软参考，不复制原文；只有用户明确指定的事实、原文、人物、产品或品牌元素才是硬约束。
-3. 必要时完成并保存 `article.md`，再根据全文创建 `visual-plan.md`。图片位置必须服务于解释、对比、演示、氛围或阅读节奏。
+3. 新写或实质改写正文时，按 [文案衔接规则](../references/writing-integration.md) 调用包内 [活人写作](../human-writing/SKILL.md)，完成材料检查、正文与改稿后保存 `article.md`，再根据全文创建 `visual-plan.md`。仅封面或已有定稿配图跳过写作改稿。图片位置必须服务于解释、对比、演示、氛围或阅读节奏。
 4. 选择平台视觉参数。只在存在实质歧义时确认。
 5. 按 [references/workflow/prompt-template.md](references/workflow/prompt-template.md) 为每张图片写入完整 prompt。参考图处理见 [references/workflow/reference-images.md](references/workflow/reference-images.md)。
 6. 返回资产规格列表给父级 `skillsvc-image`；不得直接执行图片生成。

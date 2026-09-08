@@ -25,6 +25,10 @@ Nano Banana，支持文生图、参考图生图、连续图片编辑，以及基
 
 根技能统一负责模型、CLI、图片校验、session 和 `generation-manifest.json`。`gzh-image` 与 `xhs-image` 只生成平台内容、视觉方案、prompt 和资产依赖规格，不能自行选择模型或调用 API。
 
+包内集成 [活人写作](human-writing/SKILL.md)：新写或实质改写图文内容时，先检查材料、完成文案并减少重复和空话，再按平台规划图片。平台形式优先，小红书与贴图号不会被强制写成长帖；已有定稿只配图、仅封面和纯图片编辑不触发改稿。无需另装写作 skill。
+
+完整场景及默认流程见 [场景总览](references/scenarios.md)，模块衔接见 [文案与图片](references/writing-integration.md)。典型流程为“材料检查 → 文案与改稿 → 插图/卡片规划 → 生图 → 文案与画面核对”。文案写作由使用 skill 的助手执行，图片 CLI 不会自动写文章。
+
 本技能只在本地生成文章、提示词、图片和 session，不登录、上传或发布到平台。
 
 ## 默认参数
@@ -48,11 +52,12 @@ skillsvc-image/
 ├── agents/openai.yaml               # Codex 展示元数据
 ├── scripts/generate_image.py        # 通用生图 CLI
 ├── references/                      # 共享执行契约、CLI 与普通长文配图规则
+├── human-writing/                   # 共享写作规则、文案检查脚本及回归测试
 ├── gzh-image/               # 公众号封面和正文配图规则
 └── xhs-image/                # 小红书与贴图号图片卡片规则
 ```
 
-两个平台规则目录已经包含在本技能中，不需要分别安装，也不需要在项目中创建
+两个平台规则目录与 human-writing 文案模块已经包含在本技能中，不需要分别安装，也不需要在项目中创建
 `.agents` 目录。
 
 ## 安装到 Codex
@@ -167,3 +172,7 @@ python3 scripts/generate_image.py generate \
 若本地保存失败，保留 `.pending.json` 恢复日志并执行错误消息中的 `recover --journal 路径`，即可补完保存而不重复调用生图 API。详细恢复规则与兼容性见 CLI 文档。
 
 更多参数和 API 映射见 [references/cli.md](references/cli.md)。
+
+## 致谢
+
+本项目沿用并修改了 **baoyu 大佬的生图 skill** 和 **卡兹克大佬的活人写作 skill**，在此基础上整合了文案创作、平台配图规划与 SkillSvc 图片生成流程。感谢两位大佬的分享与贡献。
