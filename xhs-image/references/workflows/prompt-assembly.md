@@ -2,6 +2,8 @@
 
 Guide for assembling image generation prompts from elements, presets, and outline content.
 
+本文件中的 `--preset`、`--style`、`--layout` 和 `--palette` 是技能规划选项的简写，不是 `scripts/generate_image.py` 参数。先把选择结果展开进完整 prompt，再把父技能支持的参数传给 CLI。
+
 ## Base Prompt Structure
 
 Every XHS infographic prompt follows this structure:
@@ -55,7 +57,7 @@ Create a Xiaohongshu (Little Red Book) style infographic following these guideli
 
 ---
 
-Generate the infographic with the model selected by `$skillsvc-image` based on the specifications above.
+Return the completed prompt and asset specification to the parent `skillsvc-image` for execution.
 ```
 
 ## Style Section Assembly
@@ -252,8 +254,8 @@ If preferences include watermark:
 
 When generating multiple images in a series:
 
-1. **Image 1 (cover)**: Use `$skillsvc-image generate` (or `reference` when the user supplied direct references) to establish the visual anchor.
-2. **Images 2+**: Use `$skillsvc-image reference --image <image-01-path>`.
+1. **Image 1 (cover)**: Return `action: generate`, or `action: reference` with user-supplied `reference_images`, to establish the visual anchor.
+2. **Images 2+**: Set `reference_asset_id: card-01` in each asset specification.
    For each later image, use the assembled prompt file as context, set the output image path, keep aspect ratio `3:4` and image size `2K`, and pass image 1 as the reference.
    This ensures the AI maintains the same character design, illustration style, and color rendering across the series.
 
@@ -361,7 +363,7 @@ be legible but not distracting from the main content.
 
 ---
 
-Generate the infographic with the model selected by `$skillsvc-image` based on the specifications above.
+Return the completed prompt and asset specification to the parent `skillsvc-image` for execution.
 ```
 
 ## Prompt Checklist

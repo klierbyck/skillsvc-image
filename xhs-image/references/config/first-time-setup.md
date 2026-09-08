@@ -1,26 +1,20 @@
 ---
 name: first-time-setup
-description: First-time setup flow for baoyu-xhs-images preferences
+description: First-time setup flow for xhs-image preferences
 ---
 
 # First-Time Setup
 
 ## Overview
 
-When no EXTEND.md is found, guide user through preference setup.
+Use this flow only when the user explicitly asks to save or reconfigure persistent preferences. A missing `EXTEND.md` does not trigger setup; ordinary generation uses built-in defaults.
 
-**⛔ BLOCKING OPERATION**: This setup MUST complete before ANY other workflow steps. Do NOT:
-- Ask about content/article
-- Ask about style or layout
-- Ask about target audience
-- Proceed to content analysis
-
-ONLY ask the questions in this setup flow, save EXTEND.md, then continue.
+Preference setup is separate from ordinary image generation. When requested, batch the questions, save `EXTEND.md`, report its path, and then return to the generation workflow.
 
 ## Setup Flow
 
 ```
-No EXTEND.md found
+User requests persistent preferences
         │
         ▼
 ┌─────────────────────┐
@@ -41,7 +35,7 @@ No EXTEND.md found
 
 **Language**: Use user's input language or saved language preference.
 
-Use single AskUserQuestion with multiple questions (AskUserQuestion auto-adds "Other" option):
+Prefer the runtime's native user-input tool and batch all questions into one interaction. If unavailable, ask one concise numbered plain-text question containing the same fields.
 
 ### Question 1: Watermark
 
@@ -76,17 +70,18 @@ header: "Save"
 question: "Where to save preferences?"
 options:
   - label: "Project"
-    description: ".baoyu-skills/ (this project only)"
+    description: ".skillsvc-image/ (this project only)"
   - label: "User"
-    description: "~/.baoyu-skills/ (all projects)"
+    description: "~/.skillsvc-image/ (all projects)"
 ```
 
 ## Save Locations
 
 | Choice | Path | Scope |
 |--------|------|-------|
-| Project | `.baoyu-skills/baoyu-xhs-images/EXTEND.md` | Current project |
-| User | `~/.baoyu-skills/baoyu-xhs-images/EXTEND.md` | All projects |
+| Project | `.skillsvc-image/xhs-image/EXTEND.md` | Current project |
+| User | `${XDG_CONFIG_HOME:-$HOME/.config}/skillsvc-image/xhs-image/EXTEND.md` | All projects |
+| User fallback | `~/.skillsvc-image/xhs-image/EXTEND.md` | All projects |
 
 ## After Setup
 

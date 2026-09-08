@@ -2,22 +2,24 @@
 
 ## Purpose
 
-Validate all 6 dimensions + aspect ratio.
+Resolve only the choices that are both unspecified and material to the result.
+
+本文件中的 `--quick`、`--type`、`--style`、`--palette`、`--rendering`、`--font` 和 `--aspect` 是技能规划选项的简写，不是 `scripts/generate_image.py` 参数。确认后应把这些选择展开到 prompt，或映射成 CLI 支持的 `--aspect-ratio` 等参数。
 
 ## Skip Conditions
 
-| Condition | Skipped Questions | Still Asked |
-|-----------|-------------------|-------------|
-| `--quick` flag | Type, Palette, Rendering, Text, Mood, Font | **Aspect Ratio** (unless `--aspect` specified) |
-| All 6 dimensions + `--aspect` specified | All | None |
-| `quick_mode: true` in EXTEND.md | Type, Palette, Rendering, Text, Mood, Font | **Aspect Ratio** (unless `--aspect` specified) |
-| Otherwise | None | All 7 questions |
+| Condition | Behavior |
+|-----------|----------|
+| `--quick`, equivalent wording, or `quick_mode: true` | Ask nothing; use explicit values, then preferences, then built-in defaults |
+| All required choices specified | Ask nothing |
+| Only non-critical choices missing | Use defaults without blocking |
+| A material ambiguity remains | Ask only the ambiguous choices in one interaction |
 
-**Important**: Aspect ratio is ALWAYS asked unless explicitly specified via `--aspect` CLI flag. User presets in EXTEND.md are shown as recommended option, not auto-selected.
+The public-account cover default is `2.35:1`; inline illustrations default to `16:9`. Do not ask for an aspect ratio merely because `--aspect` was omitted.
 
 ## Quick Mode Output
 
-When skipping 6 dimensions:
+When confirmation is skipped, report the resolved values and proceed:
 
 ```
 Quick Mode: Auto-selected dimensions
@@ -28,16 +30,16 @@ Quick Mode: Auto-selected dimensions
 • Mood: [mood] ([reason])
 • Font: [font] ([reason])
 
-[Then ask Question 7: Aspect Ratio]
+• Aspect Ratio: [ratio] ([explicit request / saved preference / platform default])
 ```
 
 ## Confirmation Flow
 
 **Language**: Auto-determined (user's input language > saved preference > source language). No need to ask.
 
-Present ALL options in a **single AskUserQuestion call** (4 questions max).
+Prefer the runtime's built-in user-input tool and batch unresolved choices into one interaction. If no such tool exists, ask one concise numbered plain-text question.
 
-Skip any question where the dimension is already specified via CLI flag or `--style` preset.
+Skip any question where the dimension is already specified in the current request or by a selected style preset.
 
 ### Q1: Type (skip if `--type`)
 
@@ -149,4 +151,4 @@ options:
 
 ## After Response
 
-Proceed to Step 3 with confirmed dimensions.
+Proceed to Step 3 with the resolved dimensions. Confirmation may come from the user, explicit request parameters, saved preferences, or built-in defaults under the rules above.

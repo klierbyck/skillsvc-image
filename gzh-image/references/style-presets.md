@@ -1,5 +1,7 @@
 # Style Presets
 
+本文件中的 `--style`、`--palette` 和 `--rendering` 只是技能在规划视觉方案时使用的快捷写法，不是 `scripts/generate_image.py` 的 CLI 参数。应先把选择结果展开到完整 prompt，再由父技能调用生图 CLI。
+
 `--style X` expands to a palette + rendering combination. Users can override either dimension.
 
 | --style | Palette | Rendering |

@@ -1,6 +1,6 @@
 ---
 name: preferences-schema
-description: EXTEND.md YAML schema for baoyu-xhs-images user preferences
+description: EXTEND.md YAML schema for xhs-image user preferences
 ---
 
 # Preferences Schema

@@ -6,8 +6,8 @@ Guide for processing user-provided reference images in cover generation.
 
 | Input Type | Action |
 |------------|--------|
-| Image file path provided | Copy to `refs/` → pass with `$skillsvc-image reference --image` |
-| Image in conversation (no path) | **ASK user for file path** with AskUserQuestion |
+| Image file path provided | Copy to `refs/` → record it in the asset specification's `reference_images` |
+| Image in conversation (no path) | Use the runtime's native user-input tool, or plain text fallback, to ask for a file path |
 | User can't provide path | Extract style/palette verbally → append to prompt (NO frontmatter references) |
 
 **CRITICAL**: Only add `references` to prompt frontmatter if files are ACTUALLY SAVED to `refs/` directory.
@@ -19,7 +19,7 @@ Guide for processing user-provided reference images in cover generation.
 2. Record concrete visual traits in the prompt; optionally create `refs/ref-NN-{slug}.md` when a reusable analysis record is useful
 3. Verify image file exists before proceeding
 
-`$skillsvc-image` supports direct reference images for both of its models. Pass each saved file with a separate `--image` argument in `reference` mode.
+For a direct visual reference, set the asset specification to `action: reference` and record every saved file under `reference_images`. The parent `skillsvc-image` owns backend execution.
 
 **Description File Format** (only when needed):
 ```yaml
@@ -33,7 +33,7 @@ usage: direct | style | palette
 
 | Usage | When to Use |
 |-------|-------------|
-| `direct` | Model sees reference image directly; required if people must appear in output |
+| `direct` | Parent executor supplies the reference image directly; required if people must appear in output |
 | `style` | Extract visual style only (not for people who must appear) |
 | `palette` | Extract color scheme only |
 
@@ -63,7 +63,7 @@ References are high-priority inputs. Extract **specific, concrete, reproducible*
 
 ### Character Analysis ⚠️ If Reference Contains People
 
-Use `usage: direct` so model sees the reference image. Additionally describe per character: **appearance**, **pose**, **clothing** → with **transformation rules** (stylize to match rendering).
+Use `usage: direct` and include the file in the asset specification's `reference_images`. Additionally describe per character: **appearance**, **pose**, **clothing** → with **transformation rules** (stylize to match rendering).
 
 | Extract | Good | Bad |
 |---------|------|-----|
@@ -79,8 +79,8 @@ Use `usage: direct`. Output each character as MUST/REQUIRED prompt instruction.
 **For saved files**:
 ```
 Reference Images Saved:
-- ref-01-{slug}.png ✓ (可通过 reference --image 使用)
-- ref-02-{slug}.png ✓ (可通过 reference --image 使用)
+- ref-01-{slug}.png ✓ (已记录到资产规格)
+- ref-02-{slug}.png ✓ (已记录到资产规格)
 ```
 
 **For extracted style**:

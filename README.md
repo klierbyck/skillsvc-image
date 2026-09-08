@@ -1,6 +1,6 @@
-# SkillSvc Image Skill
+# skillsvc image gen skill
 
-一个以图片生成为核心的通用 AI 技能，通过 SkillSvc API 调用 `gpt-image-2` 或
+一个以图片生成为核心的通用 AI 技能，通过 [https://www.skillsvc.cc](https://www.skillsvc.cc) API 调用 `gpt-image-2` 或
 Nano Banana，支持文生图、参考图生图、连续图片编辑，以及基于完整内容上下文的图文生成。
 
 ## 功能
@@ -10,8 +10,7 @@ Nano Banana，支持文生图、参考图生图、连续图片编辑，以及基
 - 文生图：根据提示词和对话上下文生成新图片。
 - 参考图生图：参考一张或多张图片的风格、人物、产品或构图，生成全新图片。
 - 图片编辑：基于已有图片或 session 持续调整，并保留此前上下文。
-- 模型选择：默认使用 `gpt-image-2`；用户明确要求 Banana、Nano Banana、
-  nanobanana、香蕉生图或 `nana-banana-2` 时才切换模型。
+- 模型选择：用户可在 `.env` 中通过 `IMAGE_MODEL` 设置默认模型；未配置时使用 `gpt-image-2`。本轮提示词或 CLI 的显式模型选择优先。
 - 参数控制：支持宽高比、`1K`/`2K`/`4K`、质量和输出格式。
 
 ### 图文扩展
@@ -19,23 +18,27 @@ Nano Banana，支持文生图、参考图生图、连续图片编辑，以及基
 这些能力用于为图片提供准确上下文，不是独立的纯文字写作或发布功能：
 
 - 普通文章：可从主题写文章并配图，也可读取已有文章，在理解完整结构后规划插图。
-- 微信公众号：使用内置 `baoyu-cover-image` 规则生成封面、正文插图或完整公众号图文。
-- 小红书与贴图号：使用内置 `baoyu-xhs-images` 规则整理文案并生成连续图片卡片。
+- 微信公众号：使用内置 `gzh-image` 规则生成封面、正文插图或完整公众号图文。
+- 小红书与贴图号：使用内置 `xhs-image` 规则整理文案并生成连续图片卡片。
 - 参考内容：文章、帖子、链接和图片默认作为软参考，仅借鉴角度、结构、语气和视觉节奏。
 - 图片编辑：每张图片保存独立 session，后续可以继续修改对应图片。
+
+根技能统一负责模型、CLI、图片校验、session 和 `generation-manifest.json`。`gzh-image` 与 `xhs-image` 只生成平台内容、视觉方案、prompt 和资产依赖规格，不能自行选择模型或调用 API。
 
 本技能只在本地生成文章、提示词、图片和 session，不登录、上传或发布到平台。
 
 ## 默认参数
 
-| 场景 | 默认模型 | 默认比例 | 默认尺寸 |
-|---|---|---:|---:|
-| 普通文生图、参考图生图、图片编辑 | `gpt-image-2` | `16:9` | `2K` |
-| 微信公众号头条封面 | `gpt-image-2` | `2.35:1` | `2K` |
-| 微信公众号正文插图 | `gpt-image-2` | `16:9` | `2K` |
-| 小红书、贴图号图片卡片 | `gpt-image-2` | `3:4` | `2K` |
+| 场景 | 默认比例 | 默认尺寸 |
+|---|---:|---:|
+| 普通文生图、参考图生图、图片编辑 | `16:9` | `2K` |
+| 微信公众号头条封面 | `2.35:1` | `2K` |
+| 微信公众号正文插图 | `16:9` | `2K` |
+| 小红书、贴图号图片卡片 | `3:4` | `2K` |
 
-用户明确指定的模型、比例、尺寸、质量和格式始终优先。
+模型不是平台固定值：新任务按本轮明确指定、`.env IMAGE_MODEL`、内置
+`gpt-image-2` 的顺序解析；编辑任务还会优先继承 session 模型。用户明确指定的
+比例、尺寸、质量和格式始终优先。
 
 ## 目录结构
 
@@ -44,9 +47,9 @@ skillsvc-image/
 ├── SKILL.md                         # 技能入口与任务路由
 ├── agents/openai.yaml               # Codex 展示元数据
 ├── scripts/generate_image.py        # 通用生图 CLI
-├── references/                      # CLI 与普通长文配图规则
-├── baoyu-cover-image/               # 公众号封面和正文配图规则
-└── baoyu-xhs-images/                # 小红书与贴图号图片卡片规则
+├── references/                      # 共享执行契约、CLI 与普通长文配图规则
+├── gzh-image/               # 公众号封面和正文配图规则
+└── xhs-image/                # 小红书与贴图号图片卡片规则
 ```
 
 两个平台规则目录已经包含在本技能中，不需要分别安装，也不需要在项目中创建
@@ -93,11 +96,13 @@ git pull
 ```dotenv
 GPT_IMAGE_API_KEY=
 NANO_BANANA_API_KEY=
+IMAGE_MODEL=gpt-image-2
 BASE_URL=https://www.skillsvc.cc
 ```
 
 - `GPT_IMAGE_API_KEY`：调用 `gpt-image-2`。
 - `NANO_BANANA_API_KEY`：调用 `nana-banana-2`。
+- `IMAGE_MODEL`：可选默认模型，支持 `gpt-image-2` 和 `nana-banana-2`；省略或留空时使用 `gpt-image-2`。
 - `BASE_URL`：可选，默认 `https://www.skillsvc.cc`。
 - 未使用的模型 Key 可以留空。
 - 进程环境变量优先于 `.env`；也可以通过 `--env-file` 指定其他配置文件。

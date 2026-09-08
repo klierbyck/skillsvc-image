@@ -1,9 +1,9 @@
 ---
 name: skillsvc-image
-description: 核心使用 SkillSvc 的 gpt-image-2 或 Nano Banana API 进行文生图、参考图生图和持续编辑；扩展支持文章配图、微信公众号图文、小红书图文和贴图号图文，根据必要上下文生成配套图片。只生成本地内容与图片，不负责发布。
+description: 核心使用 https://www.skillsvc.cc 的 gpt-image-2 或 Nano Banana API 进行文生图、参考图生图和持续编辑；扩展支持文章配图、微信公众号图文、小红书图文和贴图号图文，根据必要上下文生成配套图片。只生成本地内容与图片，不负责发布。
 ---
 
-# SkillSvc 图片生成
+# skillsvc-image 图片生成
 
 本技能的核心始终是图片生成：普通文生图、参考图生图和基于会话的持续编辑。文章写作与配图、微信公众号图文、小红书图文和贴图号图文只是图文生图扩展，只在最终交付物包含图片时处理必要的正文和结构，以便生成准确的配套图片；它不是通用纯写作或发布技能。微信公众号、小红书和贴图号的具体规则由包内两个平台规则目录负责。
 
@@ -17,16 +17,20 @@ python3 scripts/generate_image.py edit --session /path/session.json --prompt "..
 
 以本文件所在目录为基准解析 `scripts/generate_image.py`。仅在配置环境、使用高级参数、对接其他 AI 或排查调用问题时读取 [references/cli.md](references/cli.md)。
 
+本技能拥有模型选择、CLI 调用、输出校验、session 和 `generation-manifest.json`。平台任务、多资产任务或需要 manifest 映射的编辑任务在执行前读取 [references/image-generation-contract.md](references/image-generation-contract.md)。普通单图的 `generate`、`reference` 或直接 `edit` 保持原有独立流程，无需加载平台子技能或共享 contract。平台子技能只负责内容与视觉规划，并返回不含模型和 session 的资产规格；完成规划后必须回到本技能执行。
+
 ## 平台技能路由
 
-- 用户要求公众号封面、正文配图、公众号图文，或明确要求“写公众号文章并配图”时，使用 [baoyu-cover-image/SKILL.md](baoyu-cover-image/SKILL.md) 完成视觉规划和必要正文，再由本技能的 CLI 生图。
-- 用户要求小红书图文、贴图号图文，或直接要求“写小红书/贴图号内容”时，使用 [baoyu-xhs-images/SKILL.md](baoyu-xhs-images/SKILL.md) 整理必要文案并生成图片卡片。
+- 用户明确要求公众号封面、头图、正文配图、公众号图文，或“写公众号文章并配图”时，使用 [gzh-image/SKILL.md](gzh-image/SKILL.md) 完成视觉规划并返回资产规格，然后回到本技能执行生成。
+- 用户明确要求小红书、小绿书、XHS、RedNote、贴图号或微信贴图号图文时，使用 [xhs-image/SKILL.md](xhs-image/SKILL.md) 整理文案、卡片结构和资产依赖，然后回到本技能执行生成。
 - 用户要求普通文章配图或“写文章并配图”，且没有指定上述平台时，读取 [references/article-illustration.md](references/article-illustration.md)。
 - 用户只要求生成或编辑一张普通图片时，直接使用本文件的通用生图流程。
 - 用户只要求纯文字写作且不需要任何图片时，不应触发本技能。
-- 贴图或小红书类关键词优先于普通公众号关键词，避免两个平台技能同时处理同一请求。
+- “贴图”“配图”“加图”本身不是平台信号，应结合用户要求的最终交付物判断；确实无法判断目标平台时，只询问一次。
 - 以用户要求的最终内容类型决定路由，不以参考材料来自哪个平台决定。例如“参考一篇公众号文章写小红书”仍使用小红书技能。
 - 两个平台目录各自拥有独立 `SKILL.md` 和 `references/`，但都属于本技能包并统一调用本技能的生图 CLI；不把平台规则复制进本文件，也不修改用户机器上另外安装的原版技能。
+
+普通生图不经过 `gzh-image` 或 `xhs-image`。根技能直接整理 prompt，并在需要记录时自行创建默认 `asset_id`（例如 `image-01`）；平台子技能不是普通 `generate`、`reference` 或 `edit` 的依赖。
 
 ## 参考内容原则
 
@@ -37,8 +41,9 @@ python3 scripts/generate_image.py edit --session /path/session.json --prompt "..
 
 ## 默认值与模型路由
 
-- 默认使用 `gpt-image-2`。
-- 只有用户明确指定 Banana、Nano Banana、nanobanana、香蕉生图或 `nana-banana-2` 时才切换到 `nana-banana-2`。
+- 新建图片的模型优先级为：用户本轮明确指定 > `.env` 中的 `IMAGE_MODEL` > `gpt-image-2`。用户未指定模型时不要传 `--model`，由 CLI 解析环境默认值。
+- 用户明确指定 Banana、Nano Banana、nanobanana、香蕉生图或 `nana-banana-2` 时传入 `--model nana-banana-2`；明确指定 GPT 时传入 `--model gpt-image-2`。
+- 编辑已有 session 时的优先级为：用户本轮明确指定 > session 原模型 > `.env` 中的 `IMAGE_MODEL` > `gpt-image-2`。默认保持 session 原模型。
 - 默认比例为 `16:9`，默认尺寸为 `2K`，默认质量为 `auto`。
 - 用户明确指定的比例、尺寸、质量和格式始终优先。`1K`/`2K`/`4K` 表示图片尺寸，`low`/`medium`/`high` 表示渲染质量。
 - API 失败后不得静默切换模型。按用户任务合理重试，否则报告原始错误。
@@ -49,7 +54,7 @@ python3 scripts/generate_image.py edit --session /path/session.json --prompt "..
 - `reference`：参考一张或多张图片的风格、人物、产品或构图线索，但生成一张新图片。不得把它表述成“保持原图其他内容不变”。
 - `edit`：修改已有图片。优先通过 `--session` 取得上一张成品并继承历史要求；没有会话时使用 `--image`。
 
-每张需要独立迭代的图片使用独立会话。CLI 会输出包含 `image`、`session`、`model` 和实际参数的 JSON；同一图片后续修改应保留并复用返回的会话路径。
+每张需要独立迭代的图片使用独立会话。由本技能把 CLI 返回的 `image`、`session`、`model` 和实际参数写入 `generation-manifest.json`；同一资产后续修改通过 `asset_id` 查找并复用对应会话。视觉参考关系不等于共享编辑会话。
 
 ## 从上下文构造提示词
 
@@ -65,11 +70,13 @@ python3 scripts/generate_image.py edit --session /path/session.json --prompt "..
 
 ## 执行与验证
 
-1. CLI 会自动加载技能根目录的 `.env`；确认所需密钥已配置，但不得输出密钥值。
-2. 选择 `generate`、`reference` 或 `edit`，只传入用户指定或不同于默认值的参数。
-3. 使用可用的图片查看工具检查每张成品，包括主体准确性、构图、文字、瑕疵、宽高比以及关联图片之间的一致性。
-4. 若存在能依据原要求直接修正的明显问题，通过该图片的会话进行编辑。未经用户要求，不额外消耗付费调用生成备选版本。
-5. 返回图片和会话的绝对路径，并简要说明使用的模型与尺寸。
+1. 平台、多资产或 manifest 编辑任务读取共享生成契约，并检查每项资产规格都具有稳定且唯一的 `asset_id`；普通单图任务跳过此步骤。
+2. CLI 会自动加载技能根目录的 `.env`；确认所需密钥已配置，但不得输出密钥值。
+3. 选择 `generate`、`reference` 或 `edit`。只有用户本轮明确指定模型时才传 `--model`；否则让 CLI 按 session、`.env` 和内置默认值解析。manifest 编辑通过 `asset_id` 取得对应 session。
+4. 按资产依赖顺序执行，成功一项就原子更新 manifest；不得让不同资产共享编辑 session。
+5. 使用可用的图片查看工具检查每张成品，包括主体准确性、构图、文字、瑕疵、宽高比以及关联图片之间的一致性。
+6. 若存在能依据原要求直接修正的明显问题，通过该资产自己的会话进行编辑。未经用户要求，不额外消耗付费调用生成备选版本。
+7. 返回图片、manifest 和会话的绝对路径，并简要说明使用的模型与尺寸。
 
 ## 长文上下文配图
 

@@ -46,7 +46,7 @@ options: [默认, macaron, warm, neon]
 ```yaml
 header: Count
 question: "Image count. Current: {N}"
-hint: Range 2-10
+hint: Range 1-10; 1 uses single-card mode, 2 uses cover + summary
 ```
 
 ```yaml

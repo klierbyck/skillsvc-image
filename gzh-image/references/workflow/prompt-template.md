@@ -1,6 +1,6 @@
 # Step 3: Prompt Template
 
-Save to `prompts/cover.md`:
+Save to `prompts/01-cover-{slug}.md`. This file is the only prompt source of truth for the cover:
 
 ```markdown
 ---
@@ -76,7 +76,7 @@ Palette notes: [key characteristics from palette definition]
 
 When reference images are provided, they are the **primary visual input** and MUST strongly influence the output. The cover should look like it belongs to the same visual family as the references.
 
-**Passing a reference image alone is NOT enough.** Image generation models often ignore reference images unless the prompt text explicitly describes what to reproduce. Always combine `$skillsvc-image reference --image` with detailed textual instructions.
+**Recording a reference image alone is NOT enough.** Image generation models often ignore references unless the prompt text explicitly describes what to reproduce. Always combine the asset specification's `reference_images` with detailed textual instructions.
 
 ## Content-Driven Design
 
@@ -160,7 +160,7 @@ references:
 
 | Situation | Frontmatter Action | Generation Action |
 |-----------|-------------------|-------------------|
-| Reference file saved to `refs/` | Add to `references` list ✓ | Pass via `reference --image` |
+| Reference file saved to `refs/` | Add to `references` list ✓ | Add to the asset specification's `reference_images` |
 | Style extracted verbally (no file) | Omit `references` field | Describe in prompt body only |
 | File path in frontmatter but doesn't exist | ERROR - fix or remove | Generation will fail |
 
@@ -170,7 +170,7 @@ references:
 
 | Usage | When to Use | Generation Action |
 |-------|-------------|-------------------|
-| `direct` | Reference matches desired output closely | Pass to `$skillsvc-image reference --image` |
+| `direct` | Reference matches desired output closely | Set `action: reference` and record the file in `reference_images` |
 | `style` | Extract visual style characteristics only | Describe style in prompt text |
 | `palette` | Extract color palette only | Include colors in prompt |
 
@@ -184,10 +184,10 @@ For each reference image, extract:
 
 ### Step 2: Embed in Prompt ⚠️ CRITICAL
 
-**Passing a reference image alone is NOT enough.** Image generation models frequently ignore reference images unless the prompt text explicitly and forcefully describes what to reproduce. You MUST always write detailed textual instructions when using `reference --image`.
+**Recording a reference image alone is NOT enough.** Image generation models frequently ignore references unless the prompt text explicitly and forcefully describes what to reproduce. You MUST always write detailed textual instructions when using direct references.
 
 **If file saved**:
-- Pass reference images through `$skillsvc-image reference --image`
+- Record reference images in the asset specification and set `action: reference`
 - **ALWAYS** add a detailed mandatory section in the prompt body:
 
 ```

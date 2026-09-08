@@ -1,6 +1,6 @@
 ---
 name: watermark-guide
-description: Watermark configuration guide for baoyu-xhs-images
+description: Watermark configuration guide for gzh-image
 ---
 
 # Watermark Guide
@@ -12,7 +12,7 @@ description: Watermark configuration guide for baoyu-xhs-images
 │                  [top-right]│
 │                             │
 │                             │
-│         IMAGE CONTENT       │
+│       COVER IMAGE           │
 │                             │
 │                             │
 │[bottom-left][bottom-center][bottom-right]│
@@ -23,8 +23,8 @@ description: Watermark configuration guide for baoyu-xhs-images
 
 | Position | Best For | Avoid When |
 |----------|----------|------------|
-| `bottom-right` | Default choice, most common | Key info in bottom-right |
-| `bottom-left` | Right-heavy layouts | Key info in bottom-left |
+| `bottom-right` | Default choice, most common | Title in bottom-right |
+| `bottom-left` | Right-heavy layouts | Key visual in bottom-left |
 | `bottom-center` | Centered designs | Text-heavy bottom area |
 | `top-right` | Bottom-heavy content | Title/header in top-right |
 
@@ -32,14 +32,14 @@ description: Watermark configuration guide for baoyu-xhs-images
 
 | Format | Example | Style |
 |--------|---------|-------|
-| Handle | `@username` | Most common for XHS |
-| Text | `MyBrand` | Simple branding |
-| Chinese | `小红书:用户名` | Platform specific |
-| URL | `myblog.com` | Cross-platform |
+| Handle | `@username` | Social media |
+| Domain | `myblog.com` | Cross-platform |
+| Brand | `MyBrand` | Simple branding |
+| Chinese | `博客名` | Chinese platforms |
 
 ## Best Practices
 
-1. **Consistency**: Use same watermark across all images in series
+1. **Consistency**: Use same watermark across all covers
 2. **Legibility**: Ensure watermark readable on both light/dark areas
 3. **Size**: Keep subtle - should not distract from content
 
@@ -52,11 +52,18 @@ Include a subtle watermark "[content]" positioned at [position].
 The watermark should be legible but not distracting from the main content.
 ```
 
+## Cover-Specific Considerations
+
+| Aspect Ratio | Recommended Position | Notes |
+|--------------|---------------------|-------|
+| 2.35:1 | bottom-right | Cinematic - keep corners clean |
+| 16:9 | bottom-right | Standard - flexible placement |
+| 1:1 | bottom-center | Square - centered often works better |
+
 ## Common Issues
 
 | Issue | Solution |
 |-------|----------|
 | Watermark invisible | Adjust position or check contrast |
 | Watermark too prominent | Change position or reduce size |
-| Watermark overlaps content | Change position |
-| Inconsistent across images | Use session ID for consistency |
+| Watermark overlaps title | Change position or reduce title area |
