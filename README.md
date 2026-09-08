@@ -106,6 +106,7 @@ BASE_URL=https://www.skillsvc.cc
 - `BASE_URL`：可选，默认 `https://www.skillsvc.cc`。
 - 未使用的模型 Key 可以留空。
 - 进程环境变量优先于 `.env`；也可以通过 `--env-file` 指定其他配置文件。
+- 默认不读取当前工作目录的 `.env`；自定义 API 地址必须使用 HTTPS，携带凭据的请求不自动跟随重定向。
 
 `.env` 已加入 `.gitignore`，不要把真实密钥提交到 Git。
 
@@ -160,5 +161,9 @@ python3 scripts/generate_image.py generate \
 
 成功后 CLI 输出 JSON，其中包含图片绝对路径、session 路径、模型和实际参数。
 同一张图片的后续调整应继续使用对应 session；不同图片应使用不同 session。
+
+同一 manifest 的资产依次生成，CLI 用跨进程锁保护状态。`status: generated` 表示机器校验与保存成功，真实宽高见 `actual_dimensions`；文字和构图仍需视觉检查。新会话使用相对图像路径，支持整体移动输出目录。
+
+若本地保存失败，保留 `.pending.json` 恢复日志并执行错误消息中的 `recover --journal 路径`，即可补完保存而不重复调用生图 API。详细恢复规则与兼容性见 CLI 文档。
 
 更多参数和 API 映射见 [references/cli.md](references/cli.md)。

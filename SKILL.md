@@ -73,8 +73,8 @@ python3 scripts/generate_image.py edit --session /path/session.json --prompt "..
 1. 平台、多资产或 manifest 编辑任务读取共享生成契约，并检查每项资产规格都具有稳定且唯一的 `asset_id`；普通单图任务跳过此步骤。
 2. CLI 会自动加载技能根目录的 `.env`；确认所需密钥已配置，但不得输出密钥值。
 3. 选择 `generate`、`reference` 或 `edit`。只有用户本轮明确指定模型时才传 `--model`；否则让 CLI 按 session、`.env` 和内置默认值解析。manifest 编辑通过 `asset_id` 取得对应 session。
-4. 按资产依赖顺序执行，成功一项就原子更新 manifest；不得让不同资产共享编辑 session。
-5. 使用可用的图片查看工具检查每张成品，包括主体准确性、构图、文字、瑕疵、宽高比以及关联图片之间的一致性。
+4. 同一 manifest 按资产依赖顺序串行执行，由 CLI 加锁并更新元数据；不得让不同资产共享编辑 session。本地保存失败时使用错误消息中的 `recover --journal` 恢复，不重新调用付费 API。
+5. CLI 的 `generated` 仅表示通过完整解码且已保存。使用可用的图片查看工具检查每张成品，包括主体准确性、构图、文字、瑕疵、真实宽高比以及关联图片之间的一致性，并在交付说明或 `visual-plan.md` 记录结果。
 6. 若存在能依据原要求直接修正的明显问题，通过该资产自己的会话进行编辑。未经用户要求，不额外消耗付费调用生成备选版本。
 7. 返回图片、manifest 和会话的绝对路径，并简要说明使用的模型与尺寸。
 

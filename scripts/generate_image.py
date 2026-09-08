@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import io
 import json
 import os
 import re
@@ -12,17 +13,20 @@ import sys
 import tempfile
 import time
 import uuid
+import warnings
 from contextlib import ExitStack
 from datetime import datetime, timezone
-from math import gcd
+from math import gcd, isfinite
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlsplit
 
 try:
     import requests
+    from PIL import Image
+    from filelock import FileLock, Timeout as LockTimeout
 except ImportError as exc:  # pragma: no cover - environment dependent
-    raise SystemExit("Missing dependency: install requests with 'python3 -m pip install requests'") from exc
+    raise SystemExit("Missing dependency: run 'python3 -m pip install -r requirements.txt'") from exc
 
 
 DEFAULT_BASE_URL = "https://www.skillsvc.cc"
@@ -48,6 +52,7 @@ MIME_EXTENSIONS = {
     "image/webp": "webp",
 }
 MAX_REMOTE_IMAGE_BYTES = 32 * 1024 * 1024
+MAX_IMAGE_PIXELS = 40_000_000
 
 
 class ImageAPIError(RuntimeError):
@@ -93,7 +98,8 @@ def load_environment(explicit_path: Optional[str]) -> list[str]:
         load_env_file(path)
         return [str(path)]
 
-    candidates = [Path.cwd() / ".env", Path(__file__).resolve().parents[1] / ".env"]
+    # 工作目录可能是不可信仓库，不能让它隐式改变凭据的接收端。
+    candidates = [Path(__file__).resolve().parents[1] / ".env"]
     loaded: list[str] = []
     for path in candidates:
         resolved = path.resolve()
@@ -117,7 +123,7 @@ def parse_ratio(value: str) -> tuple[float, float]:
     if not match:
         raise ValueError(f"宽高比 '{value}' 无效；应使用 W:H 格式，例如 16:9")
     width, height = (float(part) for part in match.groups())
-    if not width or not height or max(width / height, height / width) > 3:
+    if not all(isfinite(v) and v > 0 for v in (width, height)) or max(width / height, height / width) > 3:
         raise ValueError("宽高比两边必须为正数，且比例不能超过 3:1")
     return width, height
 
@@ -165,7 +171,21 @@ def api_key_for(model: str) -> tuple[Optional[str], str]:
 
 
 def base_url() -> str:
-    return (os.getenv("IMAGE_API_BASE_URL") or os.getenv("BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
+    value = (os.getenv("IMAGE_API_BASE_URL") or os.getenv("BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
+    validate_api_url(value)
+    return value
+
+
+def validate_api_url(value: str) -> None:
+    parsed = urlsplit(value)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("API 地址端口无效") from exc
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username is not None
+            or parsed.password is not None or parsed.query or parsed.fragment
+            or (port is not None and port == 0)):
+        raise ValueError("API 地址必须是无用户名、密码、查询参数和片段的 HTTPS URL")
 
 
 def load_context(values: list[str], files: list[str]) -> list[str]:
@@ -187,9 +207,71 @@ def load_session(path: Optional[Path]) -> Optional[dict[str, Any]]:
         session = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"无法读取会话文件 {path}：{exc}") from exc
-    if not isinstance(session, dict) or session.get("version") != 1:
+    if not isinstance(session, dict) or type(session.get("version")) is not int or session.get("version") != 1:
         raise ValueError(f"会话文件无效或版本不受支持：{path}")
+    validate_session(session)
     return session
+
+
+def validate_session(session: dict[str, Any]) -> None:
+    """兼容缺省字段，但不把错误类型或无效枚举带入请求构造。"""
+    def fail(field: str) -> None:
+        raise ValueError(f"会话字段无效：{field}")
+
+    if type(session.get("version")) is not int or session.get("version") != 1:
+        fail("version")
+
+    def parameters(value: Any, field: str) -> None:
+        if not isinstance(value, dict):
+            fail(field)
+        for key, choices in {
+            "quality": {"auto", "low", "medium", "high"},
+            "output_format": {"png", "jpeg", "webp"},
+            "image_size": {"1K", "2K", "4K"},
+        }.items():
+            if key in value and not (key == "image_size" and value[key] is None):
+                if not isinstance(value[key], str) or value[key] not in choices:
+                    fail(f"{field}.{key}")
+        if "compression" in value and (
+            type(value["compression"]) is not int or not 0 <= value["compression"] <= 100
+        ):
+            fail(f"{field}.compression")
+        for key, parser in (("aspect_ratio", parse_ratio), ("size", parse_exact_size)):
+            if key in value:
+                if not isinstance(value[key], str):
+                    fail(f"{field}.{key}")
+                try:
+                    parser(value[key])
+                except (ValueError, OverflowError):
+                    fail(f"{field}.{key}")
+
+    if "model" in session:
+        if not isinstance(session["model"], str) or session["model"] not in MODEL_ALIASES:
+            fail("model")
+    if "manifest" in session and (not isinstance(session["manifest"], str) or not session["manifest"] or "\x00" in session["manifest"]):
+        fail("manifest")
+    parameters(session.get("parameters", {}), "parameters")
+    context = session.get("context", [])
+    if not isinstance(context, list) or not all(isinstance(v, str) for v in context):
+        fail("context")
+    turns = session.get("turns", [])
+    if not isinstance(turns, list):
+        fail("turns")
+    for index, turn in enumerate(turns):
+        field = f"turns[{index}]"
+        if not isinstance(turn, dict):
+            fail(field)
+        for key in ("prompt", "effective_prompt", "output_image", "input_image"):
+            if key in turn and not (key == "input_image" and turn[key] is None):
+                if not isinstance(turn[key], str) or "\x00" in turn[key]:
+                    fail(f"{field}.{key}")
+        if "input_images" in turn and (
+            not isinstance(turn["input_images"], list)
+            or not all(isinstance(v, str) and "\x00" not in v for v in turn["input_images"])
+        ):
+            fail(f"{field}.input_images")
+        if "parameters" in turn:
+            parameters(turn["parameters"], f"{field}.parameters")
 
 
 def load_manifest(path: Optional[Path]) -> Optional[dict[str, Any]]:
@@ -221,7 +303,7 @@ def manifest_record_path(manifest_path: Path, value: Path) -> str:
     """优先在 manifest 中保存可移植的相对路径。"""
     resolved = value.expanduser().resolve()
     try:
-        return resolved.relative_to(manifest_path.parent).as_posix()
+        return Path(os.path.relpath(resolved, manifest_path.parent)).as_posix()
     except ValueError:
         return str(resolved)
 
@@ -256,11 +338,11 @@ def load_prompt(
     raise ValueError("需要 --prompt 或 --prompt-file")
 
 
-def last_output(session: dict[str, Any]) -> Optional[Path]:
+def last_output(session: dict[str, Any], session_path: Optional[Path] = None) -> Optional[Path]:
     for turn in reversed(session.get("turns", [])):
         output = turn.get("output_image")
         if output:
-            return Path(output).expanduser().resolve()
+            return manifest_file_path(session_path, output) if session_path else Path(output).expanduser().resolve()
     return None
 
 
@@ -419,6 +501,7 @@ def call_gpt(
     url: str,
     timeout: int,
 ) -> tuple[bytes, str, str]:
+    validate_api_url(url)
     fields: dict[str, Any] = {
         "model": DEFAULT_MODEL,
         "prompt": prompt,
@@ -444,6 +527,7 @@ def call_gpt(
                 data={name: str(value) for name, value in fields.items()},
                 files=files,
                 timeout=timeout,
+                allow_redirects=False,
             )
     else:
         endpoint = f"{url}/v1/images/generations"
@@ -452,6 +536,7 @@ def call_gpt(
             headers={**headers, "Content-Type": "application/json"},
             json=fields,
             timeout=timeout,
+            allow_redirects=False,
         )
     image, mime = extract_gpt_image(
         checked_json(response), key, timeout, f"image/{output_format}", url
@@ -468,6 +553,7 @@ def call_nano(
     url: str,
     timeout: int,
 ) -> tuple[bytes, str, str]:
+    validate_api_url(url)
     parts: list[dict[str, Any]] = [{"text": prompt}]
     for source in sources:
         mime = source_image_mime(source)
@@ -490,6 +576,7 @@ def call_nano(
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         json=payload,
         timeout=timeout,
+        allow_redirects=False,
     )
     result = checked_json(response)
     for candidate in result.get("candidates", []):
@@ -520,10 +607,10 @@ def detected_image_extension(data: bytes) -> Optional[str]:
 
 
 def source_image_mime(path: Path) -> str:
-    with path.open("rb") as handle:
-        extension = detected_image_extension(handle.read(12))
-    if extension is None:
-        raise ValueError(f"输入文件不是受支持的 PNG、JPEG 或 WebP 图片：{path}")
+    try:
+        extension = validated_image_extension(path.read_bytes(), "application/octet-stream")
+    except ImageAPIError as exc:
+        raise ValueError(f"输入文件不是受支持的完整 PNG、JPEG 或 WebP 图片：{path}：{exc}") from exc
     return {
         "png": "image/png",
         "jpeg": "image/jpeg",
@@ -532,13 +619,33 @@ def source_image_mime(path: Path) -> str:
 
 
 def validated_image_extension(data: bytes, mime: str) -> str:
+    if len(data) > MAX_REMOTE_IMAGE_BYTES:
+        raise ImageAPIError("图片超过 32 MB 限制")
     detected = detected_image_extension(data)
     if detected is None:
         raise ImageAPIError("API 返回的数据不是受支持的 PNG、JPEG 或 WebP 图片")
     declared = MIME_EXTENSIONS.get(mime.split(";", 1)[0].lower())
     if declared and canonical_extension(declared) != canonical_extension(detected):
         raise ImageAPIError(f"API 返回的图片格式与 Content-Type 不一致：{mime} / {detected}")
+    image_dimensions(data)
     return detected
+
+
+def image_dimensions(data: bytes) -> tuple[int, int]:
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(data)) as image:
+                if image.width * image.height > MAX_IMAGE_PIXELS:
+                    raise ImageAPIError("图片像素数超过 4000 万限制")
+                dimensions = image.size
+                image.verify()
+            # verify 不会完整解码 JPEG 等格式，必须再次打开并 load。
+            with Image.open(io.BytesIO(data)) as image:
+                image.load()
+        return dimensions
+    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+        raise ImageAPIError("图片数据损坏或无法完整解码") from exc
 
 
 def requested_output_path(output_dir: Path, requested: str, extension: str) -> Path:
@@ -552,10 +659,8 @@ def requested_output_path(output_dir: Path, requested: str, extension: str) -> P
 
 
 def unique_output_path(output_dir: Path, requested: Optional[str], extension: str) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
     if requested:
         candidate = requested_output_path(output_dir, requested, extension)
-        candidate.parent.mkdir(parents=True, exist_ok=True)
         if candidate.exists():
             raise ValueError(f"拒绝覆盖已有输出文件：{candidate}")
         return candidate
@@ -574,11 +679,184 @@ def validate_requested_output(output_dir: Path, requested: Optional[str], extens
 
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2)
-        handle.write("\n")
-        temporary = Path(handle.name)
-    temporary.replace(path)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def pending_path(path: Path) -> Path:
+    return path.with_name(path.name + ".pending.json")
+
+
+def acquire_file_lock(stack: ExitStack, path: Path, dry_run: bool) -> None:
+    if dry_run:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        stack.enter_context(FileLock(str(path) + ".lock", timeout=30))
+    except LockTimeout as exc:
+        raise ValueError(f"文件正由另一个生成任务使用，请稍后重试：{path}") from exc
+
+
+def reject_pending(path: Path) -> None:
+    journal = pending_path(path)
+    if journal.exists():
+        raise ValueError(f"存在待恢复的本地保存，禁止重复生图。请执行 recover --journal {journal}")
+
+
+def validate_paths(session: Path, manifest: Optional[Path], outputs: list[Path], inputs: list[Path]) -> None:
+    metadata = [session] + ([manifest] if manifest else [])
+    for path in metadata:
+        if path.suffix.lower() != ".json" or path.name.endswith(".pending.json"):
+            raise ValueError("session/manifest 必须使用非 .pending.json 的 JSON 路径")
+    protected = metadata + [pending_path(p) for p in metadata] + [Path(str(p) + ".lock") for p in metadata]
+    resolved = [p.resolve() for p in protected]
+    if len(set(resolved)) != len(resolved):
+        raise ValueError("session、manifest 及恢复文件路径不能相同")
+    for path in outputs:
+        if path.resolve() in resolved or path.resolve() in inputs:
+            raise ValueError("图片输出路径不能覆盖输入、session 或 manifest")
+    if any(p in inputs for p in resolved):
+        raise ValueError("session/manifest 不能覆盖输入文件")
+
+
+def preflight_writable(paths: list[Path]) -> None:
+    """在付费前试写目录；实际写入仍需处理权限变化和磁盘耗尽。"""
+    for path in paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and (not path.is_file() or not os.access(path, os.W_OK)):
+            raise ValueError(f"目标文件不可写：{path}")
+        with tempfile.TemporaryFile(dir=path.parent) as handle:
+            handle.write(b"probe")
+            handle.flush()
+
+
+def preflight_image_directory(directory: Path) -> None:
+    """提前确认目标文件系统支持排他发布所需的硬链接。"""
+    directory.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=directory) as probe_directory:
+        source = Path(probe_directory) / "source"
+        source.write_bytes(b"probe")
+        try:
+            os.link(source, Path(probe_directory) / "link")
+        except OSError as exc:
+            raise ValueError("输出目录不支持硬链接排他发布，请使用本地 NTFS/ext4/APFS 等目录") from exc
+
+
+def write_image_exclusive(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        # 同目录硬链接发布完整文件，目标已存在时原子失败，不暴露半张图片。
+        os.link(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def finish_transaction(transaction: dict[str, Any]) -> dict[str, Any]:
+    result = transaction["result"]
+    output = Path(result["image"])
+    session = Path(result["session"])
+    manifest = Path(result["manifest"]) if result["manifest"] else None
+    data = base64.b64decode(transaction["image_base64"], validate=True)
+    validated_image_extension(data, result["mime_type"])
+    if output.exists():
+        if output.read_bytes() != data:
+            raise ValueError(f"恢复目标已有不同内容，拒绝覆盖；请保留恢复日志：{output}")
+    else:
+        write_image_exclusive(output, data)
+    write_json_atomic(session, transaction["session_payload"])
+    if manifest:
+        write_json_atomic(manifest, transaction["manifest_payload"])
+    # 仅在所有数据落盘后解除阻塞；重复恢复不会追加第二个 turn。
+    pending_path(session).unlink(missing_ok=True)
+    if manifest:
+        pending_path(manifest).unlink(missing_ok=True)
+    return result
+
+
+def save_transaction(result: dict[str, Any], session: dict[str, Any], manifest: Optional[dict[str, Any]], data: bytes) -> None:
+    transaction = {
+        "version": 1, "result": result, "session_payload": session,
+        "manifest_payload": manifest, "image_base64": base64.b64encode(data).decode("ascii"),
+    }
+    session_path = Path(result["session"])
+    manifest_path = Path(result["manifest"]) if result["manifest"] else None
+    journals = ([pending_path(manifest_path)] if manifest_path else []) + [pending_path(session_path)]
+    try:
+        # 保存完整图片和待提交元数据后才改动成品；恢复过程无需重新调用 API。
+        for journal in journals:
+            write_json_atomic(journal, transaction)
+        finish_transaction(transaction)
+    except (OSError, ValueError) as exc:
+        available = next((p for p in journals if p.exists()), None)
+        if available:
+            raise ValueError(f"本地保存未完成；不要重新生成，请执行 recover --journal {available}：{exc}") from exc
+        raise ValueError(f"无法保存恢复日志，API 已返回但结果未持久化；不要自动重试付费请求：{exc}") from exc
+
+
+def recover_transaction(journal: Path) -> dict[str, Any]:
+    def read_transaction() -> dict[str, Any]:
+        value = json.loads(journal.read_text(encoding="utf-8"))
+        if not isinstance(value, dict) or value.get("version") != 1:
+            raise ValueError("恢复日志格式无效")
+        result = value.get("result")
+        if not isinstance(result, dict) or not all(isinstance(result.get(k), str) for k in ("image", "session", "mime_type")):
+            raise ValueError("恢复日志 result 字段无效")
+        if "manifest" not in result or (result["manifest"] is not None and not isinstance(result["manifest"], str)):
+            raise ValueError("恢复日志 manifest 路径无效")
+        for key in ("session", "image", "manifest"):
+            if result[key] is not None and (not result[key] or not Path(result[key]).is_absolute() or "\x00" in result[key]):
+                raise ValueError(f"恢复日志 {key} 必须是绝对路径")
+        if not isinstance(value.get("session_payload"), dict) or not isinstance(value.get("image_base64"), str):
+            raise ValueError("恢复日志 session/image 字段无效")
+        validate_session(value["session_payload"])
+        manifest = Path(result["manifest"]).resolve() if result.get("manifest") else None
+        session = Path(result["session"]).resolve()
+        validate_paths(session, manifest, [Path(result["image"]).resolve()], [])
+        if journal not in [pending_path(p) for p in (session, manifest) if p]:
+            raise ValueError("恢复日志路径与记录不一致")
+        if manifest and (not isinstance(value.get("manifest_payload"), dict)
+                         or not isinstance(value["manifest_payload"].get("assets"), dict)):
+            raise ValueError("恢复日志 manifest 内容无效")
+        if last_output(value["session_payload"], session) != Path(result["image"]).resolve():
+            raise ValueError("恢复日志 session 的成品路径不一致")
+        if manifest:
+            asset_id = result.get("asset_id")
+            if not isinstance(asset_id, str):
+                raise ValueError("恢复日志 asset_id 无效")
+            record = value["manifest_payload"]["assets"].get(asset_id)
+            if not isinstance(record, dict) or not all(isinstance(record.get(k), str) for k in ("image", "session")):
+                raise ValueError("恢复日志资产记录无效")
+            if manifest_file_path(manifest, record["session"]) != session or manifest_file_path(manifest, record["image"]) != Path(result["image"]).resolve():
+                raise ValueError("恢复日志资产路径不一致")
+        return value
+
+    transaction = read_transaction()
+    with ExitStack() as stack:
+        result = transaction["result"]
+        if result.get("manifest"):
+            acquire_file_lock(stack, Path(result["manifest"]), False)
+        acquire_file_lock(stack, Path(result["session"]), False)
+        current = read_transaction()
+        if current != transaction:
+            raise ValueError("恢复日志已变化，请重新执行恢复")
+        return finish_transaction(current)
 
 
 def add_common_options(parser: argparse.ArgumentParser) -> None:
@@ -599,7 +877,7 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--manifest", help="generation-manifest.json 路径；需与 --asset-id 同时使用")
     parser.add_argument("--asset-id", help="manifest 中稳定且唯一的资产 ID")
     parser.add_argument("--asset-role", help="资产用途，例如 cover 或 content-card")
-    parser.add_argument("--env-file", help="指定 .env 文件（默认读取当前目录或技能目录）")
+    parser.add_argument("--env-file", help="显式选择可信 .env 文件（默认只读取技能目录）")
     parser.add_argument("--timeout", type=int, default=600, help="HTTP 超时秒数")
     parser.add_argument("--dry-run", action="store_true", help="不访问 API，仅校验并输出请求计划")
 
@@ -616,10 +894,23 @@ def build_parser() -> argparse.ArgumentParser:
     edit = subparsers.add_parser("edit", help="编辑图片并保留会话上下文")
     add_common_options(edit)
     edit.add_argument("--image", help="编辑源图；会话已有上次输出时可省略")
+    recover = subparsers.add_parser("recover", help="恢复未完成的本地保存，不调用 API")
+    recover.add_argument("--journal", required=True, help="错误消息中的 .pending.json 恢复日志")
     return parser
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
+    if args.command == "recover":
+        return recover_transaction(Path(args.journal).expanduser().resolve())
+    with ExitStack() as stack:
+        if args.manifest:
+            manifest_path = Path(args.manifest).expanduser().resolve()
+            acquire_file_lock(stack, manifest_path, args.dry_run)
+            reject_pending(manifest_path)
+        return run_locked(args, stack)
+
+
+def run_locked(args: argparse.Namespace, stack: ExitStack) -> dict[str, Any]:
     loaded_env_files = load_environment(args.env_file)
 
     if bool(args.manifest) != bool(args.asset_id):
@@ -669,7 +960,19 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     else:
         session_path = explicit_session_path
 
+    if session_path is None:
+        default_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else (
+            manifest_path.parent if manifest_path else (Path.cwd() / "generated_images").resolve()
+        )
+        session_path = default_dir / f"session_{uuid.uuid4().hex}.json"
+    validate_paths(session_path, manifest_path, [], [])
+    acquire_file_lock(stack, session_path, args.dry_run)
+    reject_pending(session_path)
     session = load_session(session_path)
+    if session and session.get("manifest"):
+        owner = manifest_file_path(session_path, session["manifest"])
+        if manifest_path != owner:
+            raise ValueError(f"此 session 属于 manifest；请通过 --manifest {owner} --asset-id 编辑")
     if args.command == "edit" and existing_asset is not None and session is None:
         raise ValueError(f"manifest 资产 {asset_id} 的 session 文件不存在：{session_path}")
 
@@ -745,7 +1048,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     direct_reference_images: list[Path] = []
     reference_asset_image: Optional[Path] = None
     if args.command == "edit":
-        source = Path(args.image).expanduser().resolve() if args.image else (last_output(session) if session else None)
+        source = Path(args.image).expanduser().resolve() if args.image else (last_output(session, session_path) if session else None)
         if not source or not source.is_file():
             raise ValueError("edit 需要 --image，或需要一个包含已有输出图片的会话")
         source_images = [source]
@@ -759,7 +1062,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             reference_asset = assets.get(reference_asset_id)
             if not isinstance(reference_asset, dict):
                 raise ValueError(f"manifest 中不存在参考资产：{reference_asset_id}")
-            if reference_asset.get("status") not in {None, "complete"}:
+            if reference_asset.get("status") not in {None, "generated", "complete"}:
                 raise ValueError(f"参考资产尚未完成：{reference_asset_id}")
             stored_image = reference_asset.get("image")
             if not isinstance(stored_image, str) or not stored_image:
@@ -799,10 +1102,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "compression": compression,
         }
     expected_extension = "png" if model == NANO_MODEL else output_format
+    inputs = source_images + ([prompt_file] if prompt_file else []) + [Path(p).expanduser().resolve() for p in args.context_file]
+    candidates = [requested_output_path(output_dir, args.output, ext) for ext in ("png", "jpeg", "webp")] if args.output else []
+    validate_paths(session_path, manifest_path, candidates, inputs)
     validate_requested_output(output_dir, args.output, expected_extension)
-    if session_path is None:
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        session_path = (output_dir / f"session_{stamp}.json").resolve()
     if args.dry_run:
         return {
             "dry_run": True,
@@ -834,6 +1137,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     if not key:
         raise ValueError(f"缺少 API Key：请在环境变量中设置 {key_name}")
 
+    preflight_writable([session_path, pending_path(session_path)] + ([manifest_path, pending_path(manifest_path)] if manifest_path else []) + (candidates or [output_dir / "image.png"]))
+    preflight_image_directory(candidates[0].parent if candidates else output_dir)
+
     started = time.monotonic()
     if model == NANO_MODEL:
         image_data, mime, endpoint = call_nano(
@@ -853,8 +1159,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         )
     elapsed = round(time.monotonic() - started, 3)
     extension = validated_image_extension(image_data, mime)
+    width, height = image_dimensions(image_data)
     output_path = unique_output_path(output_dir, args.output, extension)
-    output_path.write_bytes(image_data)
+    validate_paths(session_path, manifest_path, [output_path], inputs)
 
     if session is None:
         session = {
@@ -871,18 +1178,21 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "context": combined_context,
         "parameters": parameters,
     })
-    session["turns"].append({
+    if manifest_path:
+        session["manifest"] = manifest_record_path(session_path, manifest_path)
+    # 旧 session 的绝对路径仍可读取；新记录以 session 为基准保存相对路径。
+    session.setdefault("turns", []).append({
         "type": args.command,
         "created_at": utc_now(),
         "prompt": prompt,
         "effective_prompt": effective_prompt,
-        "input_image": str(source_images[0]) if args.command == "edit" else None,
-        "input_images": [str(source) for source in source_images],
-        "output_image": str(output_path),
+        "input_image": manifest_record_path(session_path, source_images[0]) if args.command == "edit" else None,
+        "input_images": [manifest_record_path(session_path, source) for source in source_images],
+        "output_image": manifest_record_path(session_path, output_path),
+        "actual_dimensions": {"width": width, "height": height},
         "mime_type": mime,
         "parameters": parameters,
     })
-    write_json_atomic(session_path, session)
 
     if manifest is not None:
         assert manifest_path is not None and asset_id is not None
@@ -903,7 +1213,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "session": manifest_record_path(manifest_path, session_path),
             "model": model,
             "parameters": parameters,
-            "status": "complete",
+            "status": "generated",
+            "actual_dimensions": {"width": width, "height": height},
             "updated_at": utc_now(),
         })
         if args.command == "reference":
@@ -916,9 +1227,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 record.pop("reference_asset_id", None)
         assets[asset_id] = record
         manifest["updated_at"] = utc_now()
-        write_json_atomic(manifest_path, manifest)
 
-    return {
+    result = {
         "image": str(output_path),
         "requested_output": args.output,
         "session": str(session_path),
@@ -931,7 +1241,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "mime_type": mime,
         "bytes": len(image_data),
         "elapsed_seconds": elapsed,
+        "actual_dimensions": {"width": width, "height": height},
+        "status": "generated",
     }
+    save_transaction(result, session, manifest, image_data)
+    return result
 
 
 def main() -> int:

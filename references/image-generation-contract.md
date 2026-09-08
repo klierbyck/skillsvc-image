@@ -60,13 +60,15 @@ output: 02-content-topic.png
       "session": "session-01.json",
       "model": "gpt-image-2",
       "parameters": {"aspect_ratio": "3:4", "image_size": "2K"},
-      "status": "complete"
+      "status": "generated"
     }
   }
 }
 ```
 
-同一 `asset_id` 始终对应同一张可持续编辑的图片。不同资产不得复用编辑 session。每次成功生成或编辑后原子写入 manifest；失败时不改写 manifest，也不得破坏已经完成的资产记录。
+同一 `asset_id` 始终对应同一张可持续编辑的图片。不同资产不得复用编辑 session。CLI 对同一 manifest/session 加跨进程锁，在请求前读取最新状态；同一 manifest 的资产必须依次调度。每次成功生成或编辑后原子写入各元数据文件；跨文件保存中断时保留恢复日志并阻止继续生成，先通过 `recover --journal` 补完本地提交，不能把部分写入的状态当作新编辑起点。
+
+CLI 写入 `status: generated` 和 `actual_dimensions`，表示通过完整解码且已保存。视觉 QA 结果由根技能在交付说明或 `visual-plan.md` 中按 `asset_id` 和图片路径记录，不把机器校验等同于文字、构图与内容检查。读取时兼容旧版 `complete` 状态。
 
 ## 执行顺序
 
@@ -74,8 +76,8 @@ output: 02-content-topic.png
 2. 按根技能规则解析模型。只有用户本轮明确指定模型时才传 `--model`；否则由 CLI 使用 session、`.env IMAGE_MODEL` 或内置默认值。
 3. 无依赖资产可以直接执行；依赖其他资产的项目必须等待锚点成功。
 4. `edit` 根据 `asset_id` 从 manifest 取得 session，不接受平台子技能提供 session 路径。
-5. 单项失败最多重试一次，不重新生成已经成功的资产，不静默切换模型。
-6. 验证图片签名、宽高比、主体、构图、文字和系列一致性，再标记完成。
+5. 本地保存失败先执行恢复命令，不重复调用 API；锁超时或参数错误先解决原因。网络结果不明时先核查服务端结果，不能盲目再次付费。确认可重试的 API 失败最多重试一次，不静默切换模型。
+6. CLI 检查图片完整性并记录真实宽高；根技能核对宽高比、主体、构图、文字和系列一致性，再记录视觉检查结果并交付。
 
 ## 文字与后处理
 

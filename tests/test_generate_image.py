@@ -1,4 +1,6 @@
 import importlib.util
+import io
+from PIL import Image
 import json
 import os
 import tempfile
@@ -12,7 +14,9 @@ SPEC = importlib.util.spec_from_file_location("generate_image", SCRIPT)
 assert SPEC and SPEC.loader
 generate_image = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(generate_image)
-PNG_BYTES = b"\x89PNG\r\n\x1a\nfake-png"
+BUFFER = io.BytesIO()
+Image.new("RGB", (64, 36), "white").save(BUFFER, format="PNG")
+PNG_BYTES = BUFFER.getvalue()
 
 
 def parse_args(*values):
@@ -130,7 +134,7 @@ class ModelSelectionTests(unittest.TestCase):
         parser = generate_image.build_parser()
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "source.png"
-            source.write_bytes(b"\x89PNG\r\n\x1a\n")
+            source.write_bytes(PNG_BYTES)
             session = Path(directory) / "session.json"
             session.write_text(
                 '{"version": 1, "model": "gpt-image-2", "parameters": {}, "turns": []}',
@@ -175,7 +179,7 @@ class IndependentModeTests(unittest.TestCase):
     def test_reference_remains_independent(self):
         with tempfile.TemporaryDirectory() as directory:
             reference = Path(directory) / "reference.png"
-            reference.write_bytes(b"\x89PNG\r\n\x1a\n")
+            reference.write_bytes(PNG_BYTES)
             result = self.run_dry([
                 "reference",
                 "--model",
@@ -193,7 +197,7 @@ class IndependentModeTests(unittest.TestCase):
     def test_edit_remains_independent_without_platform_skill(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "source.png"
-            source.write_bytes(b"\x89PNG\r\n\x1a\n")
+            source.write_bytes(PNG_BYTES)
             result = self.run_dry([
                 "edit",
                 "--model",
@@ -308,7 +312,7 @@ class ManifestTests(unittest.TestCase):
             asset = manifest["assets"]["card-01"]
             self.assertEqual(asset["image"], "card-01.png")
             self.assertEqual(asset["prompt_file"], "prompt.md")
-            self.assertEqual(asset["status"], "complete")
+            self.assertEqual(asset["status"], "generated")
             first_session = created["session"]
 
             edit_args = parse_args(
